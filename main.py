@@ -22,9 +22,9 @@ class ConnectionManager:
     async def send_message(self, message: str, websocket: WebSocket):
         await websocket.send_text(message)
 
-    async def broadcast_all(self, message: str):
+    async def broadcast_all(self, data: Dict):
         for connection in self.active_connections:
-            await connection.send_text(message)
+            await connection.send_json(data)
 
 
 class SubscriptionConnectionManager(ConnectionManager):
@@ -89,20 +89,27 @@ async def ws_tables_endpoint(
     websocket: WebSocket,
     id: str,
 ):
+    # Clients connect to Faust's Table ID that they'd like to receive updates
+    # `id` is general purpose, could be a dataset ID, or it could store any other content, example:
+    # ws://localhost:8000/tables?id=2bPxCpPFvmK4PU9eaGaUNC
+
     await manager.connect(websocket)
     await manager.subscribe_to(websocket, id)
     try:
         while True:
+            # It monitors for 2 possible events: wait_for_changes OR receive_text
+            # receive_text is required (and only used for) to the proper throwing of WebSocketDisconnect
             result = await wait_first(manager.wait_for_changes(id), websocket.receive_text())
 
-            # TODO: Get faust's table related to
+            # TODO: Request to the correct Faust Shard (using Faust's own table router) to get the content
+            # The faust agent could live here in the same process (not necessarily in the same loop)
             content = {'a': 10, 'b': 20}  # hard-coded content
 
-            print(f'there is changes for {id}')
+            print(f'there is changes for table {id} - notifying all connected clients')
             await manager.broadcast_to(id, content)
 
     except WebSocketDisconnect:
-        print(f'disconnecting id: {id}...')
+        print(f'disconnecting client: {websocket}...')
         manager.disconnect(websocket)
         manager.unsubscribe_from(websocket, id)
 
